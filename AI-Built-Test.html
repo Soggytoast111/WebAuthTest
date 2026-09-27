@@ -72,7 +72,7 @@
     }
 
     // --- 1. Compatibility Check ---
-    if (window.PulseCredential && window.PulseCredential.isUserVerifyingPlatformAuthenticatorAvailable && location.protocol === 'https:' || location.hostname === 'localhost') {
+    if (window.PublicKeyCredential && (location.protocol === 'https:' || location.hostname === 'localhost')) {
         // We simulate the presence check by trying to create a basic credential option.
         checkStatusDiv.innerHTML = "✅ WebAuthn API is available and running over HTTPS/localhost.";
         checkStatusDiv.classList.remove('info');
