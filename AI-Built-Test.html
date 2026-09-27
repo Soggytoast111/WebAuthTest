@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitLab Pages: WebAuthn Static PoC</title>
+    <style>
+        body { font-family: sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; background-color: #f4f7f6; }
+        .container { background-color: #fff; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1, h2 { color: #2c3e50; border-bottom: 2px solid #eaecef; padding-bottom: 10px; }
+        .section { margin-bottom: 2rem; }
+        button { background-color: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; font-size: 16px; margin-right: 10px; }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+        #status { padding: 10px; border-radius: 4px; margin-top: 1rem; font-weight: bold; }
+        .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background-color: #e2e3e5; color: #383d41; border: 1px solid #d6d8db; }
+        input[type="text"] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; width: 250px; }
+        code { background-color: #f8f9fa; padding: 2px 5px; border-radius: 3px; font-size: 0.9rem; border: 1px solid #dee2e6;}
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>WebAuthn Static Proof of Concept</h1>
+    <p>This page tests if your browser can interface with local hardware authenticators using only static HTML/JS.</p>
+
+    <div class="section">
+        <h2>1. Check Compatibility</h2>
+        <p>WebAuthn requires an <code>HTTPS</code> context and browser support.</p>
+        <div id="check-status" class="info">Checking availability...</div>
+    </div>
+
+    <div class="section">
+        <h2>2. Registration (One-Time)</h2>
+        <p>Enter a username and use your hardware key to register a new public credential. This public data will be stored in <code>localStorage</code>.</p>
+        <input type="text" id="username" placeholder="Enter username (e.g., 'LocalTest01')" />
+        <button id="btn-register" onclick="registerCredential()" disabled>Register Hardware Credential</button>
+    </div>
+
+    <div class="section">
+        <h2>3. Authentication (Login)</h2>
+        <p>Use your registered hardware key to prove your identity. This matches your key against the saved data.</p>
+        <p>Registered ID: <code id="registered-id">None</code></p>
+        <button id="btn-authenticate" onclick="authenticateCredential()" disabled>Authenticate Hardware</button>
+    </div>
+
+    <div id="status"></div>
+</div>
+
+<script>
+    const STORAGE_KEY = 'webauthn_static_credential';
+    const statusDiv = document.getElementById('status');
+    const checkStatusDiv = document.getElementById('check-status');
+
+    // Utility: Convert Buffer/Uint8Array to Base64 (needed for storage/transport)
+    function bufferToBase64(buffer) {
+        return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+    }
+
+    // Utility: Convert Base64 back to Uint8Array (needed for WebAuthn API calls)
+    function base64ToBuffer(base64) {
+        return Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+    }
+
+    // Utility: Generate a random challenge (simulation - usually server-side)
+    function generateChallenge() {
+        const challenge = new Uint8Array(32);
+        window.crypto.getRandomValues(challenge);
+        return challenge;
+    }
+
+    // --- 1. Compatibility Check ---
+    if (window.PulseCredential && window.PulseCredential.isUserVerifyingPlatformAuthenticatorAvailable && location.protocol === 'https:' || location.hostname === 'localhost') {
+        // We simulate the presence check by trying to create a basic credential option.
+        checkStatusDiv.innerHTML = "✅ WebAuthn API is available and running over HTTPS/localhost.";
+        checkStatusDiv.classList.remove('info');
+        checkStatusDiv.classList.add('success');
+        document.getElementById('btn-register').disabled = false;
+        loadExistingCredential();
+    } else {
+        checkStatusDiv.innerHTML = "❌ WebAuthn API is NOT available. Ensure you are using HTTPS, a modern browser, and have a hardware authenticator connected.";
+        checkStatusDiv.classList.remove('info');
+        checkStatusDiv.classList.add('error');
+    }
+
+    function loadExistingCredential() {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+            const cred = JSON.parse(saved);
+            document.getElementById('registered-id').textContent = cred.id.substring(0, 15) + '...';
+            document.getElementById('username').value = cred.username;
+            document.getElementById('btn-authenticate').disabled = false;
+        }
+    }
+
+    function setStatus(message, type) {
+        statusDiv.textContent = message;
+        statusDiv.className = type;
+    }
+
+    // --- 2. Registration Flow (Simulating Server Actions) ---
+    async function registerCredential() {
+        setStatus("Waiting for hardware prompt...", "info");
+        const usernameInput = document.getElementById('username').value;
+        if (!usernameInput) {
+            setStatus("Error: Username is required.", "error");
+            return;
+        }
+
+        // STEP 2A: Simulating Server-Side Challenge Generation
+        const challenge = generateChallenge();
+        const userId = generateChallenge(); // Simulate unique UserID
+
+        // The exact data structure needed by the browser
+        const publicKeyCredentialCreationOptions = {
+            challenge: challenge,
+            rp: { name: "Local WebAuthn PoC", id: window.location.hostname },
+            user: {
+                id: userId,
+                name: usernameInput,
+                displayName: usernameInput
+            },
+            pubKeyCredParams: [{ alg: -7, type: "public-key" }], // ES256 algorithm
+            authenticatorSelection: { userVerification: "preferred" }, // Prompt for PIN/biometric if possible
+            timeout: 60000 // 1 minute
+        };
+
+        try {
+            // STEP 2B: Trigger Browser/Hardware Prompt
+            const credential = await navigator.credentials.create({ publicKey: publicKeyCredentialCreationOptions });
+
+            // STEP 2C: Extract useful info for storage (Simulating Server Receipt)
+            // In a static app, we store this data locally. If wiped, WebAuthn can retrieve it later.
+            const credentialData = {
+                id: credential.id,
+                rawId: bufferToBase64(credential.rawId),
+                type: credential.type,
+                username: usernameInput
+                // We typically store the public key, but for simple identification matching, the ID suffices here.
+            };
+
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(credentialData));
+            loadExistingCredential(); // Update UI
+            setStatus(`Success! Hardware credential registered for '${usernameInput}'. Public data saved to localStorage.`, "success");
+
+        } catch (err) {
+            console.error(err);
+            setStatus(`Registration failed: ${err.message}`, "error");
+        }
+    }
+
+    // --- 3. Authentication Flow (Simulating Server Actions) ---
+    async function authenticateCredential() {
+        setStatus("Waiting for hardware challenge...", "info");
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (!saved) {
+            setStatus("Error: No registered credential found. Register first.", "error");
+            return;
+        }
+        const savedCred = JSON.parse(saved);
+
+        // STEP 3A: Simulating Server-Side Authentication Options Generation
+        const challenge = generateChallenge();
+
+        const publicKeyCredentialRequestOptions = {
+            challenge: challenge,
+            rpId: window.location.hostname,
+            allowCredentials: [{
+                id: base64ToBuffer(savedCred.rawId),
+                type: 'public-key'
+            }],
+            userVerification: "preferred", // Prompt for PIN/biometric
+            timeout: 60000
+        };
+
+        try {
+            // STEP 3B: Trigger Browser/Hardware Authentication Prompt
+            const assertion = await navigator.credentials.get({ publicKey: publicKeyCredentialRequestOptions });
+
+            // STEP 3C: Verification (Simulating Server-Side)
+            // If .get() resolves, the hardware matched the private key to the ID.
+            // A dynamic server would verify the signature, but for a local PoC, this success is sufficient.
+
+            setStatus(`Success! Identity Verified via hardware: '${savedCred.username}'.`, "success");
+
+        } catch (err) {
+            console.error(err);
+            setStatus(`Authentication failed: ${err.message}`, "error");
+        }
+    }
+</script>
+
+</body>
+</html>
